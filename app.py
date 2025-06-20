@@ -1,61 +1,40 @@
 from flask import Flask, request, jsonify
-import sqlite3
-import os
 from datetime import datetime, timedelta
+import os
 
 app = Flask(__name__)
-DB = "usuarios.db"
+autorizados = {}  # Armazena os logins autorizados com validade e link
 
-def init_db():
-    if not os.path.exists(DB):
-        conn = sqlite3.connect(DB)
-        c = conn.cursor()
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS usuarios (
-                login TEXT PRIMARY KEY,
-                liberado_ate TEXT,
-                link_app TEXT
-            )
-        ''')
-        conn.commit()
-        conn.close()
+@app.route("/")
+def home():
+    return "API Login Server online!"
 
-@app.route('/verificar', methods=['POST'])
-def verificar():
-    login = request.json.get("login")
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("SELECT liberado_ate, link_app FROM usuarios WHERE login=?", (login,))
-    row = c.fetchone()
-    conn.close()
-
-    if row:
-        liberado_ate_str, link = row
-        agora = datetime.utcnow()
-        liberado_ate = datetime.fromisoformat(liberado_ate_str)
-        if agora <= liberado_ate:
-            return jsonify({"status": "liberado", "link": link})
-        else:
-            return jsonify({"status": "expirado"})
-    return jsonify({"status": "nao_encontrado"})
-
-@app.route('/autorizar', methods=['POST'])
+@app.route("/autorizar", methods=["POST"])
 def autorizar():
-    login = request.json.get("login")
-    horas = int(request.json.get("horas", 1))
-    link = request.json.get("link")
+    data = request.json
+    login = data.get("login")
+    horas = int(data.get("horas", 1))
+    link = data.get("link", "")
 
-    liberado_ate = datetime.utcnow() + timedelta(hours=horas)
-    liberado_iso = liberado_ate.isoformat()
+    expira = datetime.now() + timedelta(hours=horas)
+    autorizados[login] = {"expira": expira, "link": link}
+    return jsonify({"status": "ok", "expira": expira.isoformat()})
 
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("REPLACE INTO usuarios (login, liberado_ate, link_app) VALUES (?, ?, ?)", (login, liberado_iso, link))
-    conn.commit()
-    conn.close()
+@app.route("/verificar", methods=["POST"])
+def verificar():
+    data = request.json
+    login = data.get("login")
 
-    return jsonify({"status": "autorizado", "expira": liberado_iso})
+    if login not in autorizados:
+        return jsonify({"status": "negado", "mensagem": "Login não registrado"})
 
-if __name__ == '__main__':
-    init_db()
-    app.run()
+    dados = autorizados[login]
+    if datetime.now() > dados["expira"]:
+        return jsonify({"status": "expirado", "mensagem": "Tempo expirado"})
+
+    return jsonify({"status": "liberado", "link": dados["link"]})
+
+# CONFIGURAÇÃO PARA FUNCIONAR NO RENDER
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
