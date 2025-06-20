@@ -6,7 +6,7 @@ CORS(app)
 
 # Dados válidos
 usuarios_autorizados = {
-    "nico": "123"
+    "nico": "1233"
 }
 
 @app.route("/verificar_login", methods=["POST"])
