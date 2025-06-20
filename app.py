@@ -1,28 +1,20 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS
-from datetime import datetime, timedelta
 import json
+import datetime
 import os
 
 app = Flask(__name__)
-CORS(app)
+CAMINHO_ARQUIVO = "usuarios.json"
 
-USUARIOS_FILE = "usuarios.json"
-
-# Utilitários para ler e salvar JSON
 def carregar_usuarios():
-    if not os.path.exists(USUARIOS_FILE):
+    if not os.path.exists(CAMINHO_ARQUIVO):
         return {}
-    with open(USUARIOS_FILE, "r") as f:
+    with open(CAMINHO_ARQUIVO, "r") as f:
         return json.load(f)
 
-def salvar_usuarios(dados):
-    with open(USUARIOS_FILE, "w") as f:
-        json.dump(dados, f, indent=4)
-
-@app.route("/")
-def home():
-    return "Servidor de login ativo com tempo e MAC!"
+def salvar_usuarios(usuarios):
+    with open(CAMINHO_ARQUIVO, "w") as f:
+        json.dump(usuarios, f, indent=4)
 
 @app.route("/verificar_login", methods=["POST"])
 def verificar_login():
@@ -32,32 +24,35 @@ def verificar_login():
     mac = dados.get("mac")
 
     usuarios = carregar_usuarios()
-    user = usuarios.get(usuario)
 
-    if not user or user["senha"] != senha:
-        return jsonify({"status": "erro", "mensagem": "Login ou senha incorretos."}), 401
+    if usuario not in usuarios:
+        return jsonify({"status": "erro", "mensagem": "Usuário não autorizado."})
 
-    if user["mac"] is None:
-        user["mac"] = mac
-        user["ativado_em"] = datetime.now().isoformat()
+    info = usuarios[usuario]
+
+    if info["senha"] != senha:
+        return jsonify({"status": "erro", "mensagem": "Senha incorreta."})
+
+    agora = datetime.datetime.utcnow()
+
+    # Primeira vez: registra o MAC e o tempo
+    if info["mac"] is None:
+        info["mac"] = mac
+        info["ativado_em"] = agora.isoformat()
         salvar_usuarios(usuarios)
-        return jsonify({"status": "ok", "mensagem": "Dispositivo ativado. Tempo de uso iniciado."})
+        return jsonify({"status": "ok", "mensagem": "Acesso autorizado. MAC registrado!"})
 
-    if user["mac"] != mac:
-        return jsonify({"status": "erro", "mensagem": "Este login já foi usado em outro computador."}), 403
+    # Se tentar logar de outro PC
+    if info["mac"] != mac:
+        return jsonify({"status": "erro", "mensagem": "Este usuário já está vinculado a outro PC."})
 
-    ativado_em = datetime.fromisoformat(user["ativado_em"])
-    tempo_total = timedelta(hours=user["tempo_horas"])
-    tempo_restante = (ativado_em + tempo_total) - datetime.now()
+    # Verifica tempo restante
+    ativado_em = datetime.datetime.fromisoformat(info["ativado_em"])
+    tempo_permitido = datetime.timedelta(hours=info["tempo_horas"])
+    if agora - ativado_em > tempo_permitido:
+        return jsonify({"status": "erro", "mensagem": "Tempo de acesso expirado."})
 
-    if tempo_restante.total_seconds() <= 0:
-        return jsonify({"status": "erro", "mensagem": "Tempo de uso expirado."}), 403
-
-    return jsonify({
-        "status": "ok",
-        "mensagem": f"Acesso autorizado! Tempo restante: {str(tempo_restante).split('.')[0]}"
-    })
+    return jsonify({"status": "ok", "mensagem": "Login autorizado."})
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=10000)
